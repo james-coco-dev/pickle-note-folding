@@ -26,6 +26,17 @@ contract PickNoteFolding is Ownable {
 
   address nProxy;
 
+  mapping(address => bool) public keepers;
+  uint _maxSlippage = 95;
+
+  modifier onlyKeeppers() {
+    require(
+      keepers[msg.sender] ||
+      msg.sender == address(this)
+    );
+    _;
+  }
+
   constructor(address _nProxy) {
     nProxy = _nProxy;
   }
@@ -46,7 +57,11 @@ contract PickNoteFolding is Ownable {
     IERC20(_asset).safeApprove(nProxy, ~uint256(0));
   }
 
-  function deposit(uint256 _pid, uint256 _amount) external payable {
+  function setKeeper(address _keeper, bool yesOrNo) external onlyOwner {
+    keepers[_keeper] = yesOrNo;
+  }
+
+  function deposit(uint256 _pid, uint256 _amount) public payable {
     PoolInfo storage pool = pools[_pid];
     UserInfo storage user = users[_pid][_msgSender()];
     BalanceAction memory action;
@@ -62,6 +77,22 @@ contract PickNoteFolding is Ownable {
       INProxy(nProxy).batchBalanceAction(address(this), actions);
     }
     user.amount = user.amount.add(_amount);
+  }
+
+  function getSuppliedUnleveraged() public view returns (uint256 unleveraged) {
+    
+  }
+
+  function getLeveragedSupplyTarget(uint _amount) internal view returns (uint256 supply) {
+
+  }
+
+  function getSupplied() internal view returns (uint256 supplied) {
+
+  }
+
+  function getBorrowable() internal view returns (uint256 borrowable) {
+    
   }
 
   function withdraw(uint256 _pid, uint256 _amount) external {
@@ -81,7 +112,39 @@ contract PickNoteFolding is Ownable {
     user.amount = user.amount.sub(_amount);
   }
 
+  function borrow(uint _pid, uint _amount) public onlyKeeppers returns (uint) {
+    PoolInfo storage pool = pools[_pid];
+    BalanceActionWithTrades memory action;
+    action.actionType = DepositActionType.DepositUnderlyingAndMintNToken;
+    action.currencyId = pool.currencyId;
+    action.depositActionAmount = _amount;
+    bytes32 trade = bytes32(abi.encode(TradeActionType.Borrow, 1, _amount, 0, _maxSlippage));
+    bytes32[] memory trades = new bytes32[](1);
+    trades[0] = trade;
+    action.trades = trades;
+    BalanceActionWithTrades[] memory actions = new BalanceActionWithTrades[](1);
+    actions[0] = action;
+    INProxy(nProxy).batchBalanceAndTradeAction(address(this), actions);
+  }
+
   function harvest() external {
     INProxy(nProxy).nTokenClaimIncentives();
+  }
+
+  function leverageUntil(uint256 _pid, uint256 _amount) public onlyKeeppers {
+    uint256 supplied = getSupplied();
+    uint256 _borrowAndSupply;
+
+    while(supplied < _amount) {
+      _borrowAndSupply = getBorrowable();
+      uint borrowed = borrow(_pid, _borrowAndSupply);
+      deposit(_pid, borrowed);
+    }
+  }
+
+  function leverageToMax(uint256 _pid) external {
+    uint unleveraged = getSuppliedUnleveraged();
+    uint ideaSupply = getLeveragedSupplyTarget(unleveraged);
+    leverageUntil(_pid, ideaSupply);
   }
 }
