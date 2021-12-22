@@ -87,12 +87,16 @@ contract PickNoteFolding is Ownable {
 
   }
 
-  function getSupplied() internal view returns (uint256 supplied) {
-
+  function getSupplied(uint256 _pid) internal view returns (int256 supplied) {
+    PoolInfo memory pool = pools[_pid];
+    (int256 cashBalance, , , ) = INProxy(nProxy).getBalanceStorage(address(this), pool.currencyId);
+    return cashBalance;
   }
 
-  function getBorrowable() internal view returns (uint256 borrowable) {
-    
+  function getBorrowable(uint256 _pid) internal view returns (int256 borrowable) {
+    PoolInfo memory pool = pools[_pid];
+    (, int256[] memory borrowables) = INProxy(nProxy).getFreeCollateralView(address(this));
+    return borrowables[pool.currencyId];
   }
 
   function withdraw(uint256 _pid, uint256 _amount) external {
@@ -125,6 +129,7 @@ contract PickNoteFolding is Ownable {
     BalanceActionWithTrades[] memory actions = new BalanceActionWithTrades[](1);
     actions[0] = action;
     INProxy(nProxy).batchBalanceAndTradeAction(address(this), actions);
+    return _amount;
   }
 
   function harvest() external {
@@ -132,13 +137,15 @@ contract PickNoteFolding is Ownable {
   }
 
   function leverageUntil(uint256 _pid, uint256 _amount) public onlyKeeppers {
-    uint256 supplied = getSupplied();
-    uint256 _borrowAndSupply;
+    int256 supplied = getSupplied(_pid);
+    int256 _borrowAndSupply;
 
-    while(supplied < _amount) {
-      _borrowAndSupply = getBorrowable();
-      uint borrowed = borrow(_pid, _borrowAndSupply);
-      deposit(_pid, borrowed);
+    if (supplied > 0) {
+      while(supplied < int256(_amount)) {
+        _borrowAndSupply = getBorrowable(_pid);
+        uint borrowed = borrow(_pid, uint256(_borrowAndSupply));
+        deposit(_pid, borrowed);
+      }
     }
   }
 
